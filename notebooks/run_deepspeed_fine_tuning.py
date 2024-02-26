@@ -1,9 +1,9 @@
 # Databricks notebook source
-# MAGIC %pip install torch==2.0.1
+# MAGIC %pip install -r ../requirements.txt
 
 # COMMAND ----------
 
-# MAGIC %pip install -r ../requirements.txt
+dbutils.library.restartPython()
 
 # COMMAND ----------
 
@@ -11,9 +11,10 @@
 # MAGIC %autoreload 2
 
 # COMMAND ----------
+
 from huggingface_hub import notebook_login, login
 
-# notebook_login()
+notebook_login()
 
 # COMMAND ----------
 
@@ -27,15 +28,15 @@ os.environ["NCCL_DEBUG"] = "INFO"
 
 # COMMAND ----------
 
-import logging
+# import logging
 
-logging.basicConfig(
-    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-    level=logging.INFO,
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logging.getLogger("py4j").setLevel(logging.ERROR)
-logging.getLogger("sh.command").setLevel(logging.ERROR)
+# logging.basicConfig(
+#     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+#     level=logging.INFO,
+#     datefmt="%Y-%m-%d %H:%M:%S",
+# )
+# logging.getLogger("py4j").setLevel(logging.ERROR)
+# logging.getLogger("sh.command").setLevel(logging.ERROR)
 
 # COMMAND ----------
 
@@ -46,6 +47,7 @@ from databricks_llm.notebook_utils import get_dbutils
 DEFAULT_INPUT_MODEL = "meta-llama/Llama-2-7b-chat-hf"
 SUPPORTED_INPUT_MODELS = [
     "mosaicml/mpt-30b-instruct",
+    "mistralai/Mistral-7B-Instruct-v0.2",
     "mosaicml/mpt-7b-instruct",
     "meta-llama/Llama-2-7b-chat-hf",
     "meta-llama/Llama-2-13b-chat-hf",
@@ -66,7 +68,7 @@ SUPPORTED_INPUT_MODELS = [
 
 # COMMAND ----------
 
-get_dbutils().widgets.text("num_gpus", "8", "num_gpus")
+get_dbutils().widgets.text("num_gpus", "4", "num_gpus")
 get_dbutils().widgets.text("dbfs_output_location", "/dbfs/llm/", "dbfs_output_location")
 get_dbutils().widgets.combobox(
     "pretrained_name_or_path",
@@ -76,7 +78,7 @@ get_dbutils().widgets.combobox(
 )
 get_dbutils().widgets.text(
     "dataset",
-    "mlabonne/guanaco-llama2",
+    "/dbfs/pj/llm/datasets/e2e_nlg",
     "dataset",
 )
 
@@ -89,8 +91,11 @@ dbfs_output_location = get_dbutils().widgets.get("dbfs_output_location")
 
 # COMMAND ----------
 
-# MAGIC !mkdir -p {dbfs_output_location}
+!echo {dataset}
 
+# COMMAND ----------
+
+!mkdir -p {dbfs_output_location}
 
 # COMMAND ----------
 
@@ -99,41 +104,43 @@ dbfs_output_location = get_dbutils().widgets.get("dbfs_output_location")
 
 # COMMAND ----------
 
-# MAGIC  !cd .. && deepspeed \
-# MAGIC --num_gpus="{num_gpus}" \
-# MAGIC --module databricks_llm.fine_tune \
-# MAGIC --final_model_output_path="{dbfs_output_location}" \
-# MAGIC --output_dir="/local_disk0/output" \
-# MAGIC --dataset={dataset} \
-# MAGIC --model={pretrained_name_or_path} \
-# MAGIC --tokenizer={pretrained_name_or_path} \
-# MAGIC --use_lora=false \
-# MAGIC --use_4bit=false \
-# MAGIC --deepspeed_config="ds_configs/ds_zero_3_cpu_offloading.json" \
-# MAGIC --fp16=false \
-# MAGIC --bf16=true \
-# MAGIC --per_device_train_batch_size=16 \
-# MAGIC --per_device_eval_batch_size=48 \
-# MAGIC --gradient_checkpointing=true \
-# MAGIC --gradient_accumulation_steps=1 \
-# MAGIC --learning_rate=5e-6 \
-# MAGIC --adam_beta1=0.9 \
-# MAGIC --adam_beta2=0.999 \
-# MAGIC --adam_epsilon=1e-8 \
-# MAGIC --lr_scheduler_type="cosine" \
-# MAGIC --warmup_steps=100 \
-# MAGIC --weight_decay=0.0 \
-# MAGIC --evaluation_strategy="steps" \
-# MAGIC --save_strategy="steps" \
-# MAGIC --save_steps=100 \
-# MAGIC --num_train_epochs=1
+import os
+os.environ['DATABRICKS_TOKEN'] = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().get()
+os.environ['DATABRICKS_HOST'] = "https://" + spark.conf.get("spark.databricks.workspaceUrl")
+os.environ['MLFLOW_EXPERIMENT_NAME'] = "/Users/puneet.jain@databricks.com/mlflow_blog"
+os.environ['MLFLOW_FLATTEN_PARAMS'] = "true"
+os.environ['HF_MLFLOW_LOG_ARTIFACTS'] = "true" 
+os.environ['MLFLOW_ENABLE_SYSTEM_METRICS_LOGGING'] = "true"
 
 # COMMAND ----------
 
-# MAGIC !ls -lah {dbfs_output_location}
+!export DATABRICKS_TOKEN && export DATABRICKS_HOST && export MLFLOW_EXPERIMENT_NAME && export MLFLOW_FLATTEN_PARAMS &&  \
+ export HF_MLFLOW_LOG_ARTIFACTS && export MLFLOW_ENABLE_SYSTEM_METRICS_LOGGING && cd .. && deepspeed \
+--num_gpus='{num_gpus}' \
+--module databricks_llm.fine_tune \
+--final_model_output_path='{dbfs_output_location}' \
+--output_dir="/local_disk0/output" \
+--dataset={dataset} \
+--model={pretrained_name_or_path} \
+--tokenizer={pretrained_name_or_path} \
+--use_lora=false \
+--use_4bit=false \
+--deepspeed_config="ds_configs/ds_zero_3_cpu_offloading.json" \
+--fp16=false \
+--bf16=true \
+--per_device_train_batch_size=16 \
+--per_device_eval_batch_size=48 \
+--gradient_checkpointing=true \
+--gradient_accumulation_steps=1 \
+--learning_rate=1e-6 \
+--lr_scheduler_type="cosine" \
+--warmup_steps=50 \
+--evaluation_strategy="steps" \
+--save_strategy="steps" \
+--save_steps=100 \
+--num_train_epochs=2\
+--run_name="{pretrained_name_or_path}-blog-run"
 
 # COMMAND ----------
 
 print(dbfs_output_location)
-
-# COMMAND ----------
